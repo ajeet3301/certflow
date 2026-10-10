@@ -23,7 +23,12 @@ const CONFIG = {
   // Any {{column}} works. {{certificate.pdf}} = certificate file name (and attaches the file).
   BODY: 'Hi {{name}},\n\nCongratulations! Your certificate {{certificate.pdf}} is attached.\nCertificate ID: {{certificate_id}}\n\nRegards,\nCertificates Team',
   ALWAYS_ATTACH: true,          // false = attach only if BODY contains {{certificate.pdf}}
-  HTML: false,                  // true: BODY is HTML (values are escaped)
+  HTML: false,                  // true: BODY is raw HTML (values escaped). false: styled email from BODY
+  LOGO: '',                     // https image URL, or Google Drive file ID/link (shown on top)
+  ACCENT: '#2748d8',            // accent color (top bar, links)
+  FOOTER: '',                   // small text at bottom, placeholders allowed
+  // A sheet named "Email" (key | value: SUBJECT, BODY, LOGO, ACCENT, FOOTER, SENDER_NAME, REPLY_TO)
+  // overrides the values above. The CertFlow Excel download creates it for you.
   SENDER_NAME: 'Certificates Team',
   REPLY_TO: '',
   SHEET_NAME: '',               // blank = first sheet
@@ -59,6 +64,7 @@ function ensureCols_(sh, names) {
 function run_(testOnly) {
   const start = Date.now();
   clearTriggers();
+  loadSheetConfig_();
   const sh = getSheet_();
   const headers = ensureCols_(sh, ['certificate_id', 'status', 'sent_at', 'error']);
   const last = sh.getLastRow();
@@ -132,6 +138,7 @@ function sendOne_(obj, files, to, test) {
   if (CONFIG.ALWAYS_ATTACH || /\{\{\s*certificate\./.test(CONFIG.BODY)) opts.attachments = [blob];
   if (CONFIG.REPLY_TO) opts.replyTo = CONFIG.REPLY_TO;
   if (CONFIG.HTML) opts.htmlBody = fill_(CONFIG.BODY, obj, true);
+  else opts.htmlBody = renderHtml_(obj, opts);
   MailApp.sendEmail(to, (test ? '[TEST] ' : '') + fill_(CONFIG.SUBJECT, obj, false), fill_(CONFIG.BODY, obj, false), opts);
 }
 
@@ -140,6 +147,45 @@ function findFile_(obj, files) {
   const c = [obj[CONFIG.FILE_COLUMN], obj.certificate_id + '.pdf', obj.certificate_id + '.png', obj.name + '.pdf', obj.name + '.png'];
   for (let i = 0; i < c.length; i++) if (c[i] && files[String(c[i]).toLowerCase()]) return String(c[i]);
   throw new Error('Certificate file not found in Drive folder for: ' + (obj[CONFIG.FILE_COLUMN] || obj.name || obj.certificate_id));
+}
+
+function loadSheetConfig_() {
+  const s = SpreadsheetApp.getActive().getSheetByName('Email');
+  if (!s || s.getLastRow() < 1) return;
+  const keys = ['SUBJECT', 'BODY', 'LOGO', 'ACCENT', 'FOOTER', 'SENDER_NAME', 'REPLY_TO'];
+  s.getRange(1, 1, s.getLastRow(), 2).getValues().forEach(function (r) {
+    const k = String(r[0]).trim().toUpperCase();
+    if (keys.indexOf(k) >= 0 && String(r[1]) !== '') CONFIG[k] = String(r[1]);
+  });
+}
+
+function esc_(t) { return String(t).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'); }
+
+// text -> html: **bold**, [text](https://url), line breaks. Values are escaped.
+function fmt_(t, obj) {
+  const ac = /^#[0-9a-f]{3,8}$/i.test(CONFIG.ACCENT) ? CONFIG.ACCENT : '#2748d8';
+  return esc_(fill_(t, obj, false))
+    .replace(/\*\*(.+?)\*\*/g, '<b>$1</b>')
+    .replace(/\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)/g, '<a href="$2" style="color:' + ac + '">$1</a>')
+    .replace(/\n/g, '<br>');
+}
+
+function renderHtml_(obj, opts) {
+  const ac = /^#[0-9a-f]{3,8}$/i.test(CONFIG.ACCENT) ? CONFIG.ACCENT : '#2748d8';
+  let logo = '';
+  const L = String(CONFIG.LOGO || '').trim();
+  if (/^https:\/\//.test(L)) {
+    logo = '<img src="' + esc_(L) + '" alt="" style="max-height:56px;margin-bottom:20px"><br>';
+  } else if (L) {
+    const m = L.match(/[-\w]{25,}/);
+    if (m) {
+      opts.inlineImages = { logo: DriveApp.getFileById(m[0]).getBlob() };
+      logo = '<img src="cid:logo" alt="" style="max-height:56px;margin-bottom:20px"><br>';
+    }
+  }
+  const foot = CONFIG.FOOTER ? '<div style="margin-top:24px;font-size:12px;color:#78716c">' + fmt_(CONFIG.FOOTER, obj) + '</div>' : '';
+  return '<div style="background:#f5f5f4;padding:20px"><div style="max-width:600px;margin:0 auto;background:#fff;border-radius:8px;border-top:4px solid ' + ac +
+    ';padding:24px;font:15px/1.6 Arial,sans-serif;color:#1c1917">' + logo + fmt_(CONFIG.BODY, obj) + foot + '</div></div>';
 }
 
 function slidesToPdf_(obj) {
