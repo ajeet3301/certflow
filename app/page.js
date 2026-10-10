@@ -14,6 +14,20 @@ const DEFAULT_FIELD = {
   text: '', x: 1000, y: 700, w: 1400, size: 60, minSize: 24, font: 'Montserrat', weight: 400,
   italic: false, color: '#111111', align: 'center', transform: 'none', spacing: 0, maxLines: 1,
 };
+const DEFAULT_MAIL = {
+  subject: 'Your certificate for {{course}}',
+  body: 'Hi {{name}},\n\nCongratulations! Your certificate **{{certificate.pdf}}** is attached.\nCertificate ID: {{certificate_id}}\n\nRegards,\nCertificates Team',
+  logo: '', accent: '#2748d8', footer: 'Sent to {{email}}', sender: 'Certificates Team',
+};
+const escH = (t) => String(t).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+const fillMail = (t, row) => String(t).replace(/\{\{\s*([^}]+?)\s*\}\}/g, (_, k) => (k === 'certificate.pdf' ? 'CERT-2026-XXXXXX.pdf' : k === 'certificate_id' ? 'CERT-2026-XXXXXX' : row && row[k] != null ? String(row[k]) : ''));
+const mailHtml = (m, row) => {
+  const ac = /^#[0-9a-f]{3,8}$/i.test(m.accent) ? m.accent : '#2748d8';
+  const f = (t) => escH(fillMail(t, row)).replace(/\*\*(.+?)\*\*/g, '<b>$1</b>').replace(/\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)/g, `<a href="$2" style="color:${ac}">$1</a>`).replace(/\n/g, '<br>');
+  const logo = /^https:\/\//.test(m.logo) ? `<img src="${escH(m.logo)}" alt="" style="max-height:56px;margin-bottom:20px"><br>` : '';
+  return `<div style="background:#f5f5f4;padding:20px"><div style="max-width:600px;margin:0 auto;background:#fff;border-radius:8px;border-top:4px solid ${ac};padding:24px;font:15px/1.6 Arial,sans-serif;color:#1c1917">${logo}${f(m.body)}${m.footer ? `<div style="margin-top:24px;font-size:12px;color:#78716c">${f(m.footer)}</div>` : ''}</div></div>`;
+};
+const emailAoa = (m) => [['SUBJECT', m.subject], ['BODY', m.body], ['LOGO', m.logo], ['ACCENT', m.accent], ['FOOTER', m.footer], ['SENDER_NAME', m.sender]];
 let _id = 0;
 const mk = (o) => ({ ...DEFAULT_FIELD, id: 'f' + ++_id, ...o });
 
@@ -134,6 +148,7 @@ export default function Page() {
   const [fonts, setFonts] = useState(BASE_FONTS);
   const [tick, setTick] = useState(0);
   const [opt, setOpt] = useState({ pdf: true, png: false, scale: 1, batch: 200, pattern: '{{certificate_id}}' });
+  const [mail, setMail] = useState(DEFAULT_MAIL);
   const [prog, setProg] = useState(null);
   const [msg, setMsg] = useState('');
   const canvasRef = useRef(null);
@@ -251,7 +266,7 @@ export default function Page() {
     if (!data.length) { setMsg('No data to download'); return; }
     const ws = XLSX.utils.json_to_sheet(data);
     if (kind === 'csv') { save(new Blob(['\ufeff' + XLSX.utils.sheet_to_csv(ws)], { type: 'text/csv;charset=utf-8' }), sample ? 'sample.csv' : 'data.csv'); return; }
-    const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, 'Data');
+    const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, 'Data'); if (!sample) XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(emailAoa(mail)), 'Email');
     save(new Blob([XLSX.write(wb, { bookType: 'xlsx', type: 'array' })], { type: 'application/octet-stream' }), sample ? 'sample.xlsx' : 'data.xlsx');
   }
 
@@ -311,6 +326,7 @@ export default function Page() {
       const list = items.map((it) => ({ ...it.r, certificate_id: it.id, file: `${it.name}.${ext}` }));
       const wb = XLSX.utils.book_new();
       XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(list), 'Recipients');
+      XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(emailAoa(mail)), 'Email');
       save(new Blob([XLSX.write(wb, { bookType: 'xlsx', type: 'array' })], { type: 'application/octet-stream' }), 'manifest.xlsx');
       setMsg(`Done: ${items.length} certificates. Import manifest.xlsx into Google Sheets.`);
     } catch (err) { console.error(err); setMsg('Error: ' + err.message); }
@@ -409,7 +425,31 @@ export default function Page() {
           <label style={{ margin: 0 }}><span className="muted">Load layout</span><input type="file" accept=".json" onChange={importConfig} /></label>
         </div>
 
-        <h2>4 · Export</h2>
+        <h2>4 · Email</h2>
+        <div className="card">
+          <label>Subject</label>
+          <input type="text" value={mail.subject} onChange={(e) => setMail({ ...mail, subject: e.target.value })} />
+          <label>Message ({'{{name}}'}, {'{{email}}'}, {'{{certificate.pdf}}'}, any column · **bold** · [text](https://link))</label>
+          <textarea style={{ minHeight: 120 }} value={mail.body} onChange={(e) => setMail({ ...mail, body: e.target.value })} />
+          <div className="chips">
+            {[...headers, 'certificate_id', 'certificate.pdf'].map((h) => (
+              <span key={h} className="chip" onClick={() => setMail({ ...mail, body: mail.body + `{{${h}}}` })}>{h}</span>
+            ))}
+          </div>
+          <div className="grid2">
+            <div><label>Logo (https image URL or Drive file ID)</label><input type="text" value={mail.logo} onChange={(e) => setMail({ ...mail, logo: e.target.value })} /></div>
+            <div><label>Accent color</label><input type="color" value={mail.accent} onChange={(e) => setMail({ ...mail, accent: e.target.value })} /></div>
+          </div>
+          <div className="grid2">
+            <div><label>Footer</label><input type="text" value={mail.footer} onChange={(e) => setMail({ ...mail, footer: e.target.value })} /></div>
+            <div><label>Sender name</label><input type="text" value={mail.sender} onChange={(e) => setMail({ ...mail, sender: e.target.value })} /></div>
+          </div>
+          <label>Preview (row {rows.length ? idx + 1 : 0}): {fillMail(mail.subject, rows[idx])}</label>
+          <div style={{ border: '1px solid var(--line)', borderRadius: 6, overflow: 'hidden' }} dangerouslySetInnerHTML={{ __html: mailHtml(mail, rows[idx]) }} />
+          <div className="muted" style={{ marginTop: 6 }}>Saved into the "Email" sheet of the downloaded Excel. Apps Script reads it automatically.</div>
+        </div>
+
+        <h2>5 · Export</h2>
         <div className="card">
           <div className="row">
             <label><input type="checkbox" checked={opt.pdf} onChange={(e) => setOpt({ ...opt, pdf: e.target.checked })} /> PDF</label>
