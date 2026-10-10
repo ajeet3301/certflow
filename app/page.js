@@ -18,6 +18,7 @@ const DEFAULT_MAIL = {
   subject: 'Your certificate for {{course}}',
   body: 'Hi {{name}},\n\nCongratulations! Your certificate **{{certificate.pdf}}** is attached.\nCertificate ID: {{certificate_id}}\n\nRegards,\nCertificates Team',
   logo: '', accent: '#2748d8', footer: 'Sent to {{email}}', sender: 'Certificates Team',
+  replyTo: '', attach: true, mode: 'FOLDER', slidesId: '',
 };
 const escH = (t) => String(t).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 const fillMail = (t, row) => String(t).replace(/\{\{\s*([^}]+?)\s*\}\}/g, (_, k) => (k === 'certificate.pdf' || k === 'certificate.png' ? (row && row.file) || 'CERT-2026-XXXXXX.pdf' : k === 'certificate_id' ? (row && row.certificate_id) || 'CERT-2026-XXXXXX' : row && row[k] != null ? String(row[k]) : ''));
@@ -27,7 +28,7 @@ const mailHtml = (m, row) => {
   const logo = /^https:\/\//.test(m.logo) ? `<img src="${escH(m.logo)}" alt="" style="max-height:56px;margin-bottom:20px"><br>` : '';
   return `<div style="background:#f5f5f4;padding:20px"><div style="max-width:600px;margin:0 auto;background:#fff;border-radius:8px;border-top:4px solid ${ac};padding:24px;font:15px/1.6 Arial,sans-serif;color:#1c1917">${logo}${f(m.body)}${m.footer ? `<div style="margin-top:24px;font-size:12px;color:#78716c">${f(m.footer)}</div>` : ''}</div></div>`;
 };
-const emailAoa = (m) => [['SUBJECT', m.subject], ['BODY', m.body], ['LOGO', m.logo], ['ACCENT', m.accent], ['FOOTER', m.footer], ['SENDER_NAME', m.sender]];
+const emailAoa = (m) => [['SUBJECT', m.subject], ['BODY', m.body], ['LOGO', m.logo], ['ACCENT', m.accent], ['FOOTER', m.footer], ['SENDER_NAME', m.sender], ['REPLY_TO', m.replyTo], ['ALWAYS_ATTACH', m.attach ? 'true' : 'false'], ['MODE', m.mode], ['SLIDES_TEMPLATE_ID', m.slidesId]];
 let _id = 0;
 const mk = (o) => ({ ...DEFAULT_FIELD, id: 'f' + ++_id, ...o });
 
@@ -282,6 +283,11 @@ export default function Page() {
   const onMove = (e) => { if (!drag.current) return; const p = toT(e); upd({ x: Math.round(p.x - drag.current.dx), y: Math.round(p.y - drag.current.dy) }, drag.current.id); };
   const onUp = () => { drag.current = null; };
 
+  async function copyScript() {
+    try { await navigator.clipboard.writeText(await (await fetch('/Code.gs.txt')).text()); setMsg('Apps Script code copied. In Google Sheets: Extensions > Apps Script > paste > Save.'); }
+    catch { setMsg('Could not copy. Open /Code.gs.txt and copy it manually.'); }
+  }
+
   async function dl(kind, sample) {
     const XLSX = await import('xlsx');
     const src = sample || rows;
@@ -458,9 +464,17 @@ export default function Page() {
             <div><label>Footer</label><input type="text" value={mail.footer} onChange={(e) => setMail({ ...mail, footer: e.target.value })} /></div>
             <div><label>Sender name</label><input type="text" value={mail.sender} onChange={(e) => setMail({ ...mail, sender: e.target.value })} /></div>
           </div>
+          <div className="grid2">
+            <div><label>Reply-to email</label><input type="text" value={mail.replyTo} onChange={(e) => setMail({ ...mail, replyTo: e.target.value })} /></div>
+            <div><label>Certificate source</label>
+              <select value={mail.mode} onChange={(e) => setMail({ ...mail, mode: e.target.value })}><option value="FOLDER">CertFlow PDFs (ZIP)</option><option value="SLIDES">Google Slides template</option></select></div>
+          </div>
+          {mail.mode === 'SLIDES' && (<><label>Google Slides template ID</label><input type="text" value={mail.slidesId} onChange={(e) => setMail({ ...mail, slidesId: e.target.value })} /></>)}
+          <label><input type="checkbox" checked={mail.attach} onChange={(e) => setMail({ ...mail, attach: e.target.checked })} /> Attach certificate PDF to every email</label>
+          <button style={{ marginTop: 8, width: '100%' }} onClick={copyScript}>Copy Apps Script code</button>
           <label>Preview (row {rows.length ? idx + 1 : 0}): {fillMail(mail.subject, mailRow)}</label>
           <div style={{ border: '1px solid var(--line)', borderRadius: 6, overflow: 'hidden' }} dangerouslySetInnerHTML={{ __html: mailHtml(mail, mailRow) }} />
-          <div className="muted" style={{ marginTop: 6 }}>Saved into the "Email" sheet of the downloaded Excel. Apps Script reads it automatically.</div>
+          <div className="muted" style={{ marginTop: 6 }}>All settings are saved in the "Email" sheet of the downloaded Excel. Paste the copied script once; it reads them automatically.</div>
         </div>
 
         <h2>5 · Export</h2>
