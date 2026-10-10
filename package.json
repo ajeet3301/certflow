@@ -5,7 +5,9 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build",
-    "start": "next start"
+    "start": "next start",
+    "prebuild": "node -e \"require('fs').mkdirSync('public',{recursive:true});require('fs').copyFileSync('apps-script/Code.gs','public/Code.gs.txt')\"",
+    "predev": "node -e \"require('fs').mkdirSync('public',{recursive:true});require('fs').copyFileSync('apps-script/Code.gs','public/Code.gs.txt')\""
   },
   "dependencies": {
     "jspdf": "^2.5.2",
