@@ -29,8 +29,9 @@ const CONFIG = {
   LOGO: '',                     // https image URL, or Google Drive file ID/link (shown on top)
   ACCENT: '#2748d8',            // accent color (top bar, links)
   FOOTER: '',                   // small text at bottom, placeholders allowed
-  // A sheet named "Email" (key | value: SUBJECT, BODY, LOGO, ACCENT, FOOTER, SENDER_NAME, REPLY_TO)
-  // overrides the values above. The CertFlow Excel download creates it for you.
+  // A sheet named "Email" (key | value: SUBJECT, BODY, LOGO, ACCENT, FOOTER, SENDER_NAME, REPLY_TO,
+  // MODE, SLIDES_TEMPLATE_ID, ALWAYS_ATTACH) overrides the values above.
+  // The CertFlow website writes it into the Excel download, so you rarely edit this file.
   SENDER_NAME: 'Certificates Team',
   REPLY_TO: '',
   SHEET_NAME: '',               // blank = first sheet
@@ -155,10 +156,13 @@ function findFile_(obj, files) {
 function loadSheetConfig_() {
   const s = SpreadsheetApp.getActive().getSheetByName('Email');
   if (!s || s.getLastRow() < 1) return;
-  const keys = ['SUBJECT', 'BODY', 'LOGO', 'ACCENT', 'FOOTER', 'SENDER_NAME', 'REPLY_TO'];
+  const keys = ['SUBJECT', 'BODY', 'LOGO', 'ACCENT', 'FOOTER', 'SENDER_NAME', 'REPLY_TO', 'MODE', 'SLIDES_TEMPLATE_ID', 'ALWAYS_ATTACH'];
   s.getRange(1, 1, s.getLastRow(), 2).getValues().forEach(function (r) {
     const k = String(r[0]).trim().toUpperCase();
-    if (keys.indexOf(k) >= 0 && String(r[1]) !== '') CONFIG[k] = String(r[1]);
+    if (keys.indexOf(k) < 0) return;
+    const v = String(r[1]);
+    if (k === 'ALWAYS_ATTACH') CONFIG[k] = !/^(false|no|0)$/i.test(v.trim());
+    else if (v !== '') CONFIG[k] = (k === 'BODY' || k === 'FOOTER') ? v : v.trim();
   });
 }
 
