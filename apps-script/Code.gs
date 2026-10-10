@@ -6,16 +6,18 @@
  *
  * MODE 'FOLDER': certificates were made in the CertFlow web app.
  *   1) Import manifest.xlsx into Google Sheets (has "file" + "certificate_id" columns).
- *   2) Unzip the ZIPs, upload all files into ONE Google Drive folder, put its ID below.
+ *   2) Upload the certificates_*.zip files to the SAME Drive folder as this sheet (no unzipping).
+ *   3) Menu Certificates > 1. Import certificate ZIPs (unzips, saves folder automatically).
  * MODE 'SLIDES': build each PDF from a Google Slides template using {{header}} placeholders.
  *
- * Use: menu "Certificates" > "Send test to me" first, then "Send pending".
+ * Use: menu "Certificates": 1 Import ZIPs, 2 Send test to me, 3 Send pending.
  * Re-running is safe: rows already marked SENT are skipped. Large lists auto-continue
  * via time triggers (script stops before the 6-min limit and resumes by itself).
  */
 const CONFIG = {
   MODE: 'FOLDER',               // 'FOLDER' or 'SLIDES'
-  FOLDER_ID: '',                // MODE FOLDER: Drive folder ID holding the certificate files
+  FOLDER_ID: '',                // MODE FOLDER: leave blank – set automatically by "Import certificate ZIPs"
+  ZIP_PREFIX: 'certificates',   // ZIPs from CertFlow: certificates_01.zip ... (put them next to this sheet in Drive)
   FILE_COLUMN: 'file',          // MODE FOLDER: column with the file name (e.g. CERT-2026-ABC123.pdf)
   SLIDES_TEMPLATE_ID: '',       // MODE SLIDES: Google Slides file ID
   EMAIL_COLUMN: 'email',
@@ -38,8 +40,9 @@ const CONFIG = {
 
 function onOpen() {
   SpreadsheetApp.getUi().createMenu('Certificates')
-    .addItem('Send pending', 'sendPending')
-    .addItem('Send test to me (first row)', 'sendTest')
+    .addItem('1. Import certificate ZIPs', 'importZips')
+    .addItem('2. Send test to me (first row)', 'sendTest')
+    .addItem('3. Send pending', 'sendPending')
     .addItem('Stop auto-continue', 'clearTriggers')
     .addItem('Reset status column', 'resetStatus')
     .addToUi();
@@ -200,9 +203,54 @@ function slidesToPdf_(obj) {
   }
 }
 
+function folderId_() {
+  return CONFIG.FOLDER_ID || PropertiesService.getDocumentProperties().getProperty('FOLDER_ID') || '';
+}
+
+// Finds certificates_*.zip in the same Drive folder as this sheet, unzips them into
+// a "<sheet name> certificates" folder and remembers it. Safe to re-run (skips existing files).
+function importZips() {
+  const start = Date.now();
+  const ss = SpreadsheetApp.getActive();
+  const parents = DriveApp.getFileById(ss.getId()).getParents();
+  const home = parents.hasNext() ? parents.next() : DriveApp.getRootFolder();
+  const props = PropertiesService.getDocumentProperties();
+  const name = ss.getName() + ' certificates';
+  let out;
+  const id = folderId_();
+  if (id) { out = DriveApp.getFolderById(id); }
+  else {
+    const f = home.getFoldersByName(name);
+    out = f.hasNext() ? f.next() : home.createFolder(name);
+  }
+  props.setProperty('FOLDER_ID', out.getId());
+  const have = {};
+  const ex = out.getFiles();
+  while (ex.hasNext()) have[ex.next().getName().toLowerCase()] = true;
+
+  let zips = 0, added = 0, partial = false;
+  const it = home.getFiles();
+  while (it.hasNext() && !partial) {
+    const z = it.next();
+    const n = z.getName();
+    if (!/\.zip$/i.test(n) || n.toLowerCase().indexOf(CONFIG.ZIP_PREFIX) !== 0) continue;
+    zips++;
+    const blobs = Utilities.unzip(z.getBlob().setContentType('application/zip'));
+    for (let i = 0; i < blobs.length; i++) {
+      if (Date.now() - start > CONFIG.MAX_RUNTIME_MS) { partial = true; break; }
+      const b = blobs[i], fn = b.getName().split('/').pop();
+      if (!fn || have[fn.toLowerCase()]) continue;
+      out.createFile(b.setName(fn)); have[fn.toLowerCase()] = true; added++;
+    }
+  }
+  ss.toast(zips ? ('Imported ' + added + ' files from ' + zips + ' ZIP(s)' + (partial ? '. Time limit – run again to continue.' : '. Ready: send test, then send pending.')) :
+    'No "' + CONFIG.ZIP_PREFIX + '*.zip" found. Upload the ZIPs to the same Drive folder as this sheet.', 'Certificates', 10);
+}
+
 function indexFolder_() {
+  if (!folderId_()) throw new Error('No certificate folder yet. Run Certificates > Import certificate ZIPs first.');
   const map = {};
-  const it = DriveApp.getFolderById(CONFIG.FOLDER_ID).getFiles();
+  const it = DriveApp.getFolderById(folderId_()).getFiles();
   while (it.hasNext()) { const f = it.next(); map[f.getName().toLowerCase()] = f.getId(); }
   return map;
 }
