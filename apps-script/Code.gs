@@ -86,6 +86,7 @@ function run_(testOnly) {
   const me = Session.getEffectiveUser().getEmail();
   let quota = MailApp.getRemainingDailyQuota();
   let sent = 0, failed = 0, more = false, quotaOut = false;
+  const missing = [], errors = [];
 
   for (let r = 0; r < data.length; r++) {
     const row = data[r];
@@ -106,6 +107,7 @@ function run_(testOnly) {
       if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(to)) throw new Error('Invalid email: ' + to);
       sendOne_(obj, files, to, testOnly);
       quota--; sent++;
+      console.log('SENT | row ' + rowNum + ' | ' + to + ' | ' + obj.certificate_id + ' | ' + obj['certificate.pdf']);
       if (!testOnly) {
         sh.getRange(rowNum, iStatus + 1).setValue('SENT');
         sh.getRange(rowNum, iSent + 1).setValue(new Date());
@@ -113,6 +115,9 @@ function run_(testOnly) {
       }
     } catch (e) {
       failed++;
+      const em = String(e.message || e), who = String(row[iEmail]).trim();
+      if (/Certificate file not found|No file name/.test(em)) { missing.push(who); console.warn('NO CERTIFICATE | row ' + rowNum + ' | ' + who + ' | ' + em); }
+      else { errors.push(who); console.error('FAILED | row ' + rowNum + ' | ' + who + ' | ' + em); }
       if (!testOnly) {
         sh.getRange(rowNum, iStatus + 1).setValue('FAILED');
         sh.getRange(rowNum, iErr + 1).setValue(String(e.message || e).slice(0, 300));
@@ -122,9 +127,12 @@ function run_(testOnly) {
     Utilities.sleep(CONFIG.PAUSE_MS);
   }
 
+  console.log('SUMMARY | sent: ' + sent + ' | no certificate: ' + missing.length + ' | other errors: ' + errors.length);
+  if (missing.length) console.warn('NO CERTIFICATE for: ' + missing.join(', '));
+  if (errors.length) console.error('FAILED (other) for: ' + errors.join(', '));
   if (more) scheduleNext_(quotaOut ? 60 * 60 * 1000 : 30 * 1000);
   SpreadsheetApp.getActive().toast(
-    'Sent: ' + sent + ', failed: ' + failed + (quotaOut ? '. Daily mail quota reached – will retry hourly.' : more ? '. Continuing automatically…' : '. Finished.'),
+    'Sent: ' + sent + ', no certificate: ' + missing.length + ', other failed: ' + errors.length + (quotaOut ? '. Daily mail quota reached – will retry hourly.' : more ? '. Continuing automatically…' : '. Finished.'),
     'Certificates', 10);
 }
 
