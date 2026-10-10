@@ -20,7 +20,7 @@ const DEFAULT_MAIL = {
   logo: '', accent: '#2748d8', footer: 'Sent to {{email}}', sender: 'Certificates Team',
 };
 const escH = (t) => String(t).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
-const fillMail = (t, row) => String(t).replace(/\{\{\s*([^}]+?)\s*\}\}/g, (_, k) => (k === 'certificate.pdf' ? 'CERT-2026-XXXXXX.pdf' : k === 'certificate_id' ? 'CERT-2026-XXXXXX' : row && row[k] != null ? String(row[k]) : ''));
+const fillMail = (t, row) => String(t).replace(/\{\{\s*([^}]+?)\s*\}\}/g, (_, k) => (k === 'certificate.pdf' || k === 'certificate.png' ? (row && row.file) || 'CERT-2026-XXXXXX.pdf' : k === 'certificate_id' ? (row && row.certificate_id) || 'CERT-2026-XXXXXX' : row && row[k] != null ? String(row[k]) : ''));
 const mailHtml = (m, row) => {
   const ac = /^#[0-9a-f]{3,8}$/i.test(m.accent) ? m.accent : '#2748d8';
   const f = (t) => escH(fillMail(t, row)).replace(/\*\*(.+?)\*\*/g, '<b>$1</b>').replace(/\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)/g, `<a href="$2" style="color:${ac}">$1</a>`).replace(/\n/g, '<br>');
@@ -56,6 +56,24 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 function newCertId() {
   const a = new Uint32Array(2); crypto.getRandomValues(a);
   return 'CERT-' + new Date().getFullYear() + '-' + (a[0].toString(36) + a[1].toString(36)).toUpperCase().slice(0, 6).padEnd(6, '0');
+}
+
+function genIds(n) {
+  const seen = new Set(), out = [];
+  while (out.length < n) { const id = newCertId(); if (!seen.has(id)) { seen.add(id); out.push(id); } }
+  return out;
+}
+
+// one entry per row: stable certificate id + output file name
+function buildItems(rows, ids, pattern, ext) {
+  const used = new Set();
+  return rows.map((r, i) => {
+    const id = ids[i];
+    let name = fillText({ text: pattern || '{{certificate_id}}', transform: 'none' }, { ...r, certificate_id: id }, id).replace(/[\\/:*?"<>|\u0000-\u001f]/g, '_').slice(0, 120) || id;
+    if (used.has(name.toLowerCase())) name = `${name}_${i + 1}`;
+    used.add(name.toLowerCase());
+    return { r, id, name, file: `${name}.${ext}` };
+  });
 }
 
 function fillText(f, row, id) {
@@ -151,6 +169,10 @@ export default function Page() {
   const [mail, setMail] = useState(DEFAULT_MAIL);
   const [prog, setProg] = useState(null);
   const [msg, setMsg] = useState('');
+  const ids = useMemo(() => genIds(rows.length), [rows]);
+  const ext = opt.pdf ? 'pdf' : 'png';
+  const items = useMemo(() => buildItems(rows, ids, opt.pattern, ext), [rows, ids, opt.pattern, ext]);
+  const mailRow = rows[idx] && items[idx] ? { ...rows[idx], certificate_id: items[idx].id, file: items[idx].file } : rows[idx];
   const canvasRef = useRef(null);
   const boxesRef = useRef([]);
   const drag = useRef(null);
@@ -167,7 +189,7 @@ export default function Page() {
     if (!img || !canvasRef.current) return;
     let dead = false;
     const row = rows[idx] || {};
-    const id = 'CERT-' + new Date().getFullYear() + '-XXXXXX';
+    const id = ids[idx] || 'CERT-XXXXXX';
     (async () => {
       await ensureFonts(fields, Object.values(row).join(''));
       if (dead || !canvasRef.current) return;
@@ -178,7 +200,7 @@ export default function Page() {
       boxesRef.current = drawCert(c.getContext('2d'), img, T, PK, fields, row, id, sel);
     })();
     return () => { dead = true; };
-  }, [img, T, PK, fields, rows, idx, sel, tick]);
+  }, [img, T, PK, fields, rows, ids, idx, sel, tick]);
 
   useEffect(() => {
     const h = (e) => {
@@ -262,8 +284,9 @@ export default function Page() {
 
   async function dl(kind, sample) {
     const XLSX = await import('xlsx');
-    const data = sample || rows;
-    if (!data.length) { setMsg('No data to download'); return; }
+    const src = sample || rows;
+    if (!src.length) { setMsg('No data to download'); return; }
+    const data = buildItems(src, sample ? genIds(src.length) : ids, opt.pattern, ext).map((it) => ({ ...it.r, certificate_id: it.id, file: it.file }));
     const ws = XLSX.utils.json_to_sheet(data);
     if (kind === 'csv') { save(new Blob(['\ufeff' + XLSX.utils.sheet_to_csv(ws)], { type: 'text/csv;charset=utf-8' }), sample ? 'sample.csv' : 'data.csv'); return; }
     const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, 'Data'); if (!sample) XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(emailAoa(mail)), 'Email');
@@ -281,7 +304,7 @@ export default function Page() {
     const c = document.createElement('canvas'); c.width = T.w; c.height = T.h;
     const row = rows[idx] || {};
     await ensureFonts(fields, Object.values(row).join(''));
-    drawCert(c.getContext('2d'), img, T, 1, fields, row, newCertId(), null);
+    drawCert(c.getContext('2d'), img, T, 1, fields, row, ids[idx], null);
     c.toBlob((b) => save(b, `certificate_${idx + 1}.png`), 'image/png');
   }
 
@@ -293,14 +316,6 @@ export default function Page() {
       const [{ default: JSZip }, { jsPDF }, XLSX] = await Promise.all([import('jszip'), import('jspdf'), import('xlsx')]);
       const k = opt.scale, W = Math.round(T.w * k), H = Math.round(T.h * k);
       await ensureFonts(fields, rows.map((r) => Object.values(r).join('')).join(''));
-      const ids = new Set(), used = new Set();
-      const items = rows.map((r, i) => {
-        let id; do { id = newCertId(); } while (ids.has(id)); ids.add(id);
-        let name = fillText({ text: opt.pattern || '{{certificate_id}}', transform: 'none' }, r, id).replace(/[\\/:*?"<>|\u0000-\u001f]/g, '_').slice(0, 120) || id;
-        if (used.has(name.toLowerCase())) name = `${name}_${i + 1}`;
-        used.add(name.toLowerCase());
-        return { r, id, name };
-      });
       const c = document.createElement('canvas'); c.width = W; c.height = H;
       const ctx = c.getContext('2d');
       const batch = Math.max(1, opt.batch | 0);
@@ -322,8 +337,7 @@ export default function Page() {
         save(blob, `certificates_${String(s / batch + 1).padStart(2, '0')}.zip`);
         await sleep(500);
       }
-      const ext = opt.pdf ? 'pdf' : 'png';
-      const list = items.map((it) => ({ ...it.r, certificate_id: it.id, file: `${it.name}.${ext}` }));
+      const list = items.map((it) => ({ ...it.r, certificate_id: it.id, file: it.file }));
       const wb = XLSX.utils.book_new();
       XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(list), 'Recipients');
       XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(emailAoa(mail)), 'Email');
@@ -444,8 +458,8 @@ export default function Page() {
             <div><label>Footer</label><input type="text" value={mail.footer} onChange={(e) => setMail({ ...mail, footer: e.target.value })} /></div>
             <div><label>Sender name</label><input type="text" value={mail.sender} onChange={(e) => setMail({ ...mail, sender: e.target.value })} /></div>
           </div>
-          <label>Preview (row {rows.length ? idx + 1 : 0}): {fillMail(mail.subject, rows[idx])}</label>
-          <div style={{ border: '1px solid var(--line)', borderRadius: 6, overflow: 'hidden' }} dangerouslySetInnerHTML={{ __html: mailHtml(mail, rows[idx]) }} />
+          <label>Preview (row {rows.length ? idx + 1 : 0}): {fillMail(mail.subject, mailRow)}</label>
+          <div style={{ border: '1px solid var(--line)', borderRadius: 6, overflow: 'hidden' }} dangerouslySetInnerHTML={{ __html: mailHtml(mail, mailRow) }} />
           <div className="muted" style={{ marginTop: 6 }}>Saved into the "Email" sheet of the downloaded Excel. Apps Script reads it automatically.</div>
         </div>
 
