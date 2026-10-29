@@ -4,10 +4,10 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 const BASE_FONTS = ['Playfair Display', 'Great Vibes', 'Cinzel', 'Montserrat', 'Poppins', 'Noto Sans Devanagari', 'Georgia', 'Arial', 'Times New Roman'];
 
 const SAMPLE_ROWS = [
-  { name: 'Aarav Sharma', email: 'aarav@example.test', course: 'Web Development Bootcamp', date: '09 Oct 2026' },
-  { name: 'Priya Verma', email: 'priya@example.test', course: 'Data Science Workshop', date: '09 Oct 2026' },
-  { name: 'Mohammed Al-Farsi', email: 'farsi@example.test', course: 'Cloud Computing Training', date: '09 Oct 2026' },
-  { name: 'राहुल कुमार', email: 'rahul@example.test', course: 'Digital Marketing Course', date: '09 Oct 2026' },
+  { name: 'Ajeet kumar', email: 'ajeet@example.test', course: 'Web Development Bootcamp', date: '09 Oct 2026' },
+  { name: 'Vidhi', email: 'vidhi@example.test', course: 'Data Science Workshop', date: '09 Oct 2026' },
+  { name: 'Aayushi', email: 'aayushi@example.test', course: 'Cloud Computing Training', date: '09 Oct 2026' },
+  { name: 'maroot', email: 'maruti@example.test', course: 'Digital Marketing Course', date: '09 Oct 2026' },
 ];
 
 const DEFAULT_FIELD = {
